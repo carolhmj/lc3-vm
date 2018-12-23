@@ -112,6 +112,13 @@ int main(int argc, char const *argv[]) {
                 update_flags(r0);
                 break;
             case OP_NOT:
+                //Destination register (DR)
+                uint16_t r0 = (instr >> 9) & 0x7;
+                //BaseR register
+                uint16_t base_r = (instr >> 6) & 0x7;
+
+                reg[r0] = ~reg[base_r];
+                update_flags(r0);
                 break;        
             case OP_BR:
                 //Get condition that will be tested
@@ -171,16 +178,53 @@ int main(int argc, char const *argv[]) {
                 update_flags(r0);
                 break;
             case OP_LDR:
+                //Destination register (DR)
+                uint16_t r0 = (instr >> 9) & 0x7;
+                //Base register (baseR)
+                uint16_t br = (instr >> 6) & 0x7;
+
+                //Offset
+                uint16_t off = sign_extend(instr & 0x1f, 6);
+                reg[r0] = mem_read(reg[br] + off);
+
+                update_flags(r0);
                 break;
             case OP_LEA:
+                //Destination register (DR)
+                uint16_t r0 = (instr >> 9) & 0x7;
+                //Offset
+                uint16_t off = sign_extend(instr & 0x1ff, 9);
+
+                reg[r0] = mem_read(reg[R_PC] + off);
+                update_flags(r0);
                 break;
             case OP_ST:
+                //Destination register (DR)
+                uint16_t r0 = (instr >> 9) & 0x7;
+                //Offset
+                uint16_t off = sign_extend(instr & 0x1ff, 9);            
+                
+                mem_write(reg[R_PC] + off, reg[r0]);
                 break;
             case OP_STI:
                 break;
             case OP_STR:
+                //Destination register (DR)
+                uint16_t r0 = (instr >> 9) & 0x7;
+                //Base register (baseR)
+                uint16_t br = (instr >> 6) & 0x7;
+
+                //Offset
+                uint16_t off = sign_extend(instr & 0x1f, 6);
+                
+                mem_write(reg[br] + off, reg[r0]);
                 break;
             case OP_TRAP:
+                //Store PC's contents here so we can return from the calling routine
+                reg[R_R7] = reg[R_PC];
+                uint16_t trapvect = sign_extend(instr & 0xff, 8);
+
+                reg[R_PC] = mem_read(trapvect);
                 break;
             case OP_RES:
             case OP_RTI:
