@@ -67,12 +67,43 @@ enum {
     TRAP_HALT = 0x25 /*halt program*/
 };
 
+enum {
+    MR_KBSR = 0xfe00, /*keyboard status*/
+    MR_KBDR = 0xfe02 /*keyboard data*/
+};
+
+struct termios original_tio;
+
 uint16_t sign_extend(uint16_t x, int bit_count);
 void update_flags(uint16_t r);
+void read_image_file(FILE* file);
+int read_image(const char* image_path);
+uint16_t swap16(uint16_t x);
+void mem_write(uint16_t address, uint16_t val);
+uint16_t mem_read(uint16_t address);
+uint16_t check_key();
+void disable_input_buffering();
+void restore_input_buffering();
+void handle_interrupt(int signal);
 
 int main(int argc, char const *argv[]) {
     /* load arguments */
+    if (argc < 2) {
+        /* show usage string */
+        printf("lc3 [image-file1] ...\n");
+        exit(2);
+    }
+
+    for (int j = 1; j < argc; ++j) {
+        if (!read_image(argv[j]))
+        {
+            printf("failed to load image: %s\n", argv[j]);
+            exit(1);
+        }
+    }
     /* setup */
+    signal(SIGINT, handle_interrupt);
+    disable_input_buffering();
     /* start PC */
     enum {PC_START = 0x3000};
     reg[R_PC] = PC_START;
@@ -232,6 +263,7 @@ int main(int argc, char const *argv[]) {
                         break;
                     case TRAP_OUT:
                         putchar(reg[R_R0]);
+                        fflush(stdout);
                         break;
                     case TRAP_PUTS:
                         uint16_t* c = memory + reg[R_R0];
@@ -248,15 +280,18 @@ int main(int argc, char const *argv[]) {
                         reg[R_R0] = c;
                         break;
                     case TRAP_PUTSP:
-                        uint16_t *c = memory + reg[R_R0];
+                        uint16_t* c = memory + reg[R_R0];
                         while (*c) {
-                            putc((char)(*c && 0xff), stdout);
-                            putc((char)(*c && 0xff00), stdout);
+                            putc((char)(*c & 0xff), stdout);
+                            putc((char)(*c & 0xff00), stdout);
                             ++c;
                         }
                         fflush(stdout);
                         break;
                     case TRAP_HALT:
+                        puts("HALT");
+                        fflush(stdout);
+                        running = 0;
                         break;                    
                 }
                 break;
@@ -267,7 +302,7 @@ int main(int argc, char const *argv[]) {
                 break;                                            
         }
     }
-    return 0;
+    restore_input_buffering();
 }
 
 uint16_t sign_extend(uint16_t x, int bit_count) {
@@ -285,4 +320,64 @@ void update_flags(uint16_t r) {
     } else {
         reg[R_COND] = FL_POS;
     }
+}
+
+void read_image_file(FILE* file) {
+    uint16_t origin;
+    fread(&origin, sizeof(origin), 1, file);
+    origin = swap16(origin);
+
+    uint16_t max_read = UINT16_MAX - origin;
+    uint16_t* p = memory + origin;
+    size_t read = fread(p, sizeof(uint16_t), max_read, file);
+
+    while (read-- > 0) {
+        *p = swap16(*p);
+        ++p;
+    } 
+}
+
+int read_image(const char* image_path) {
+    FILE* file = fopen(image_path, "rb");
+    if (!file) { return 0; }
+    read_image_file(file);
+    fclose(file);
+    return 1;
+}
+
+uint16_t swap16(uint16_t x) {
+    return (x << 8) | (x >> 8);
+}
+
+void mem_write(uint16_t address, uint16_t val) {
+    memory[address] = val;
+}
+
+uint16_t mem_read(uint16_t address) {
+    if (address == MR_KBSR) {
+        if (check_key()) {
+            memory[MR_KBSR] = 1 << 15;
+            memory[MR_KBDR] = getchar();
+        } else {
+            memory[MR_KBSR] = 0;
+        }
+    }
+    return memory[address];
+}
+
+void disable_input_buffering() {
+    tcgetattr(STDIN_FILENO, &original_tio);
+    struct termios new_tio = original_tio;
+    new_tio.c_lflag &= ~ICANON & ~ECHO;
+    tcsetattr(STDIN_FILENO, TCSANOW, &new_tio);
+}
+
+void restore_input_buffering() {
+    tcsetattr(STDIN_FILENO, TCSANOW, &original_tio);
+}
+
+void handle_interrupt(int signal) {
+    restore_input_buffering();
+    printf("\n");
+    exit(-2);
 }
